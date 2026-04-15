@@ -10,46 +10,37 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --fix-missing qemu-user-static binfmt-support
-
-      - name: Enable ARM emulation
-        run: |
           sudo update-binfmts --enable qemu-arm
 
       - name: Download Alpine Pi image
         run: |
           wget https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/armv7/alpine-rpi-3.23.3-armv7.tar.gz
 
-      - name: Extract and modify
+      - name: Extract image
         run: |
-          mkdir rootfs
+          mkdir -p rootfs
           tar -xzf alpine-rpi-3.23.3-armv7.tar.gz -C rootfs
+
+      - name: Download specific packages for armv7
+        run: |
+          mkdir -p rootfs/apks/armv7
           
-          # Download the actual apk packages for armv7
-          mkdir -p packages
-          wget -r -nd -A "*.apk" -P packages \
-            https://dl-cdn.alpinelinux.org/alpine/v3.23/main/armv7/
-          
-          # Copy packages into the image's apks folder
-          cp packages/openssl*.apk rootfs/apks/armv7/
-          cp packages/vim*.apk rootfs/apks/armv7/
-          
-          # Add to world file so they install on boot
+          # Download only what we need with dependencies
+          docker run --rm \
+            -v $(pwd)/rootfs/apks/armv7:/packages \
+            arm32v7/alpine \
+            sh -c "apk fetch -R -o /packages openssl vim"
+
+      - name: Create apkovl
+        run: |
           mkdir -p apkovl/etc/apk
-          cp rootfs/apks/armv7/APKINDEX.tar.gz apkovl/ || true
-          echo -e "openssl\nvim" >> apkovl/etc/apk/world
-          
+          echo -e "openssl\nvim" > apkovl/etc/apk/world
           cd apkovl
           tar -czf ../rootfs/localhost.apkovl.tar.gz .
-          cd ..
-          
-          # Repack
-          tar -czf alpine-rpi-custom.tar.gz -C rootfs .
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: alpine-rpi-custom
-          path: alpine-rpi-custom.tar.gz
+      - name: Repack image
+        run: |
+          tar -czf alpine-rpi-custom.tar.gz -C rootfs .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
