@@ -23,6 +23,9 @@ jobs:
         run: |
           mkdir rootfs
           tar -xzf alpine-rpi-3.23.3-armv7.tar.gz -C rootfs
+          ls rootfs
+          ls rootfs/usr || echo "no usr"
+          ls rootfs/bin || echo "no bin"
           
           # Copy qemu into the chroot so ARM binaries can run
           sudo cp /usr/bin/qemu-arm-static rootfs/usr/bin/
