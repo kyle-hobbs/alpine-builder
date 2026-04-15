@@ -11,6 +11,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --fix-missing qemu-user-static binfmt-support
 
+      - name: Enable ARM emulation
+        run: |
+          sudo update-binfmts --enable qemu-arm
+
       - name: Download Alpine Pi image
         run: |
           wget https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/armv7/alpine-rpi-3.23.3-armv7.tar.gz
@@ -19,7 +23,13 @@ jobs:
         run: |
           mkdir rootfs
           tar -xzf alpine-rpi-3.23.3-armv7.tar.gz -C rootfs
-          sudo chroot rootfs /bin/sh -c "apk update && apk add openssl vim"
+          
+          # Copy qemu into the chroot so ARM binaries can run
+          sudo cp /usr/bin/qemu-arm-static rootfs/usr/bin/
+          
+          # Now chroot works
+          sudo chroot rootfs /usr/bin/qemu-arm-static /bin/sh -c "apk update && apk add openssl vim"
+          
           tar -czf alpine-rpi-custom.tar.gz -C rootfs .
 
       - name: Upload artifact
