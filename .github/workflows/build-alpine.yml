@@ -23,16 +23,33 @@ jobs:
         run: |
           mkdir rootfs
           tar -xzf alpine-rpi-3.23.3-armv7.tar.gz -C rootfs
-          ls rootfs/apks
-          ls rootfs/boot
           
-          # Copy qemu into the chroot so ARM binaries can run
-          sudo cp /usr/bin/qemu-arm-static rootfs/usr/bin/
+          # Download the actual apk packages for armv7
+          mkdir -p packages
+          wget -r -nd -A "*.apk" -P packages \
+            https://dl-cdn.alpinelinux.org/alpine/v3.23/main/armv7/
           
-          # Now chroot works
-          sudo chroot rootfs /usr/bin/qemu-arm-static /bin/sh -c "apk update && apk add openssl vim"
+          # Copy packages into the image's apks folder
+          cp packages/openssl*.apk rootfs/apks/armv7/
+          cp packages/vim*.apk rootfs/apks/armv7/
           
+          # Add to world file so they install on boot
+          mkdir -p apkovl/etc/apk
+          cp rootfs/apks/armv7/APKINDEX.tar.gz apkovl/ || true
+          echo -e "openssl\nvim" >> apkovl/etc/apk/world
+          
+          cd apkovl
+          tar -czf ../rootfs/localhost.apkovl.tar.gz .
+          cd ..
+          
+          # Repack
           tar -czf alpine-rpi-custom.tar.gz -C rootfs .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpine-rpi-custom
+          path: alpine-rpi-custom.tar.gz
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
