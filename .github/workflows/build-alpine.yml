@@ -1,0 +1,31 @@
+name: Build Alpine Pi Image
+
+on: [push, workflow_dispatch]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install dependencies
+        run: sudo apt-get install -y qemu-user-static binfmt-support
+
+      - name: Download Alpine Pi image
+        run: |
+          wget https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/armv7/alpine-rpi-3.23.3-armv7.tar.gz
+
+      - name: Extract and modify
+        run: |
+          mkdir rootfs
+          tar -xzf alpine-rpi-3.23.3-armv7.tar.gz -C rootfs
+          
+          # chroot and install packages
+          sudo chroot rootfs /bin/sh -c "apk update && apk add openssl vim"
+          
+          # Repack
+          tar -czf alpine-rpi-custom.tar.gz -C rootfs .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpine-rpi-custom
+          path: alpine-rpi-custom.tar.gz
