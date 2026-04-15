@@ -6,6 +6,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -21,7 +24,7 @@ jobs:
           mkdir -p rootfs
           tar -xzf alpine-rpi-3.23.3-armv7.tar.gz -C rootfs
 
-      - name: Download specific packages for armv7
+      - name: Download packages for armv7
         run: |
           mkdir -p rootfs/apks/armv7
           
@@ -29,12 +32,52 @@ jobs:
             --platform linux/arm/v7 \
             -v $(pwd)/rootfs/apks/armv7:/packages \
             arm32v7/alpine \
-            sh -c "apk update && apk fetch -R -o /packages openssl vim"
+            sh -c "apk update && apk fetch -R -o /packages \
+              gnupg \
+              gnupg-dirmngr \
+              gpg-agent \
+              gnupg-scdaemon \
+              cryptsetup \
+              e2fsprogs \
+              pcsc-lite \
+              pcsc-lite-libs \
+              pcsc-lite-openrc \
+              ccid \
+              pinentry \
+              yubikey-manager \
+              ykpers"
 
-      - name: Create apkovl
+      - name: Create apkovl with config files
         run: |
           mkdir -p apkovl/etc/apk
-          echo -e "openssl\nvim" > apkovl/etc/apk/world
+          mkdir -p apkovl/root/.gnupg
+
+          # World file - packages to install on boot
+          cat > apkovl/etc/apk/world << 'EOF'
+          gnupg
+          gnupg-dirmngr
+          gpg-agent
+          gnupg-scdaemon
+          cryptsetup
+          e2fsprogs
+          pcsc-lite
+          pcsc-lite-libs
+          pcsc-lite-openrc
+          ccid
+          pinentry
+          yubikey-manager
+          ykpers
+          EOF
+
+          # Bake in config files from your repo
+          cp configs/gpg.conf apkovl/root/.gnupg/gpg.conf
+          cp configs/gpg-agent.conf apkovl/root/.gnupg/gpg-agent.conf
+
+          # Set correct permissions for gnupg
+          chmod 700 apkovl/root/.gnupg
+          chmod 600 apkovl/root/.gnupg/gpg.conf
+          chmod 600 apkovl/root/.gnupg/gpg-agent.conf
+
           cd apkovl
           tar -czf ../rootfs/localhost.apkovl.tar.gz .
 
