@@ -50,7 +50,45 @@ jobs:
               for pkg in libcrypto3 libssl3 libblkid libuuid musl zlib gnutls; do
                 ls /packages/\${pkg}-*.apk 2>/dev/null | sort -V | head -n -1 | xargs rm -f
               done"
+      - name: Build apkovl and local cache
+        run: |
+          # 1. Create apkovl - just etc/apk config
+          mkdir -p apkovl/etc/apk
+          
+          # Point to local cache on SD card
+          cat > apkovl/etc/apk/repositories << 'EOF'
+          /media/mmcblk0p1/apks
+          EOF
 
+          # World file - desired packages
+          cat > apkovl/etc/apk/world << 'EOF'
+          alpine-base
+          gnupg
+          gpg-agent
+          gnupg-dirmngr
+          gnupg-scdaemon
+          cryptsetup
+          e2fsprogs
+          pcsc-lite
+          pcsc-lite-libs
+          pcsc-lite-openrc
+          ccid
+          pinentry
+          yubikey-manager
+          ykpers
+          EOF
+
+          cd apkovl && tar -czf ../rootfs/localhost.apkovl.tar.gz . && cd ..
+
+          # 2. Regenerate clean APKINDEX from our downloaded packages
+          docker run --rm \
+            --platform linux/arm/v7 \
+            -v $(pwd)/rootfs/apks/armv7:/pkgs \
+            arm32v7/alpine \
+            sh -c "apk index --allow-untrusted \
+              -o /pkgs/APKINDEX.tar.gz /pkgs/*.apk"
+
+              
       - name: Create apkovl with config files
         run: |
           mkdir -p apkovl/etc/apk
