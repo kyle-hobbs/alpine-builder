@@ -27,12 +27,13 @@ jobs:
       - name: Download packages for armv7
         run: |
           mkdir -p rootfs/apks/armv7
-          
           docker run --rm \
             --platform linux/arm/v7 \
             -v $(pwd)/rootfs/apks/armv7:/packages \
             arm32v7/alpine \
-            sh -c "apk update && apk fetch -R -o /packages \
+            sh -c "apk update && \
+              cp /var/cache/apk/*.tar.gz /packages/ && \
+              apk fetch -R -o /packages \
               gnupg \
               gnupg-dirmngr \
               gpg-agent \
