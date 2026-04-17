@@ -118,18 +118,39 @@ jobs:
           docker run --rm \
             --platform linux/arm/v7 \
             --privileged \
+            -v $(pwd)/rootfs/apks/armv7:/pkgs \
             -v $(pwd)/rootfs:/rootfs \
             arm32v7/alpine \
             sh -c "
-              # Install directly from local apk files, no index needed
-              apk add --allow-untrusted --no-network \
-                /rootfs/apks/armv7/*.apk
+              # Clear existing world/repo state
+              echo '' > /etc/apk/repositories
+              rm -f /etc/apk/world
 
-              # Save installed state
-              cp /etc/apk/world /rootfs/apk-world
+              # Build fresh index
+              mkdir -p /local/armv7
+              cp /pkgs/*.apk /local/armv7/
+              apk index -vU --allow-untrusted \
+                -o /local/armv7/APKINDEX.tar.gz \
+                /local/armv7/*.apk
+
+              echo '/local' > /etc/apk/repositories
+
+              # Install with clean state
+              apk add --allow-untrusted --force-overwrite \
+                gnupg gpg-agent gnupg-dirmngr gnupg-scdaemon \
+                cryptsetup e2fsprogs pcsc-lite pcsc-lite-libs \
+                pcsc-lite-openrc ccid pinentry \
+                yubikey-manager ykpers
+
+              # Export installed filesystem
               tar -czf /rootfs/localhost.apkovl.tar.gz \
+                -C / \
                 etc/apk/world \
-                lib/apk/db
+                usr/bin/gpg \
+                usr/bin/gpg-agent \
+                usr/lib/gnupg \
+                usr/bin/ykman \
+                usr/bin/ykpers
             "
             
       - name: Repack image
