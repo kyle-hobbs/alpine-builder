@@ -107,6 +107,7 @@ jobs:
 
           cd apkovl
           tar -czf ../rootfs/localhost.apkovl.tar.gz .
+
       - name: Install packages into image
         run: |
           docker run --rm --privileged tonistiigi/binfmt --install arm
@@ -117,27 +118,15 @@ jobs:
             -v $(pwd)/rootfs:/rootfs \
             arm32v7/alpine \
             sh -c "
-              mkdir -p /etc/apk/cache/armv7
-              cp /rootfs/apks/armv7/*.apk /etc/apk/cache/armv7/
-              
-              apk index -vU --allow-untrusted \
-                -o /etc/apk/cache/armv7/APKINDEX.tar.gz \
-                /etc/apk/cache/armv7/*.apk
-              
-              echo '/etc/apk/cache' > /etc/apk/repositories
-              
-              apk update --allow-untrusted
-              apk add --allow-untrusted \
-                gnupg gpg-agent gnupg-dirmngr gnupg-scdaemon \
-                cryptsetup e2fsprogs pcsc-lite pcsc-lite-libs \
-                pcsc-lite-openrc ccid pinentry \
-                yubikey-manager ykpers
-              
-              # Save the installed state
+              # Install directly from local apk files, no index needed
+              apk add --allow-untrusted --no-network \
+                /rootfs/apks/armv7/*.apk
+
+              # Save installed state
+              cp /etc/apk/world /rootfs/apk-world
               tar -czf /rootfs/localhost.apkovl.tar.gz \
-                /etc/apk/world \
-                /var/lib/apk \
-                /lib/apk
+                etc/apk/world \
+                lib/apk/db
             "
             
       - name: Repack image
