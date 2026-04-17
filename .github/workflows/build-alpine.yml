@@ -9,108 +9,106 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Enable ARM emulation
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --fix-missing qemu-user-static binfmt-support
-          sudo update-binfmts --enable qemu-arm
+          docker run --rm --privileged tonistiigi/binfmt --install arm
 
       - name: Download Alpine Pi image
         run: |
           wget https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/armv7/alpine-rpi-3.23.3-armv7.tar.gz
-
-      - name: Extract image
-        run: |
           mkdir -p rootfs
           tar -xzf alpine-rpi-3.23.3-armv7.tar.gz -C rootfs
 
-      - name: Download packages for armv7
+      - name: Install packages and build apkovl
         run: |
+          mkdir -p output
+
+          docker run --rm \
+            --platform linux/arm/v7 \
+            --privileged \
+            -v $(pwd)/output:/output \
+            arm32v7/alpine \
+            sh -c "
+              apk update
+              apk add --no-cache \
+                gnupg \
+                gpg-agent \
+                gnupg-dirmngr \
+                gnupg-scdaemon \
+                cryptsetup \
+                e2fsprogs \
+                pcsc-lite \
+                pcsc-lite-libs \
+                pcsc-lite-openrc \
+                ccid \
+                pinentry \
+                yubikey-manager \
+                ykpers
+
+              # Save installed package list
+              cp /etc/apk/world /output/world
+
+              # Export all installed files as apkovl
+              cd /
+              tar -czf /output/localhost.apkovl.tar.gz \
+                etc/apk/world \
+                etc/apk/protected_paths.d \
+                usr/bin/gpg \
+                usr/bin/gpg2 \
+                usr/bin/gpg-agent \
+                usr/bin/gpgconf \
+                usr/bin/gpgsm \
+                usr/bin/gpgv \
+                usr/bin/ykman \
+                usr/bin/ykpers \
+                usr/lib/gnupg \
+                usr/lib/engines-3 \
+                usr/share/gnupg \
+                usr/lib/libgpg-error.so.0 \
+                usr/lib/libgcrypt.so.20 \
+                usr/lib/libassuan.so.0 \
+                usr/lib/libksba.so.8 \
+                usr/lib/libnpth.so.0 \
+                lib/libcryptsetup.so.12 \
+                lib/libdevmapper.so.1.02 \
+                sbin/cryptsetup \
+                sbin/e2fsck \
+                sbin/mkfs.ext2 \
+                usr/lib/pcsc \
+                usr/sbin/pcscd
+            "
+
+      - name: Inject apkovl and gpg configs into image
+        run: |
+          # Place apkovl into rootfs
+          cp output/localhost.apkovl.tar.gz rootfs/
+
+          # Also download packages for airgap cache
           mkdir -p rootfs/apks/armv7
-          
           docker run --rm \
             --platform linux/arm/v7 \
             -v $(pwd)/rootfs/apks/armv7:/packages \
             arm32v7/alpine \
-            sh -c "apk update && apk fetch -R --no-cache -o /packages \
-              gnupg \
-              gnupg-dirmngr \
-              gpg-agent \
-              gnupg-scdaemon \
-              cryptsetup \
-              e2fsprogs \
-              pcsc-lite \
-              pcsc-lite-libs \
-              pcsc-lite-openrc \
-              ccid \
-              pinentry \
-              yubikey-manager \
-              ykpers && \
-              # Remove older duplicate versions
-              for pkg in libcrypto3 libssl3 libblkid libuuid musl zlib gnutls; do
-                ls /packages/\${pkg}-*.apk 2>/dev/null | sort -V | head -n -1 | xargs rm -f
-              done"
-      - name: Build apkovl and local cache
-        run: |
-          # 1. Create apkovl - just etc/apk config
+            sh -c "
+              apk update
+              apk fetch -R --no-cache -o /packages \
+                gnupg gpg-agent gnupg-dirmngr gnupg-scdaemon \
+                cryptsetup e2fsprogs pcsc-lite pcsc-lite-libs \
+                pcsc-lite-openrc ccid pinentry \
+                yubikey-manager ykpers
+
+              # Build local index
+              apk index --allow-untrusted \
+                -o /packages/APKINDEX.tar.gz \
+                /packages/*.apk
+            "
+
+          # Set up repositories to point at local cache
           mkdir -p apkovl/etc/apk
-          
-          # Point to local cache on SD card
-          cat > apkovl/etc/apk/repositories << 'EOF'
-          /media/mmcblk0p1/apks
-          EOF
+          echo '/media/mmcblk0p1/apks' > apkovl/etc/apk/repositories
 
-          # World file - desired packages
-          cat > apkovl/etc/apk/world << 'EOF'
-          alpine-base
-          gnupg
-          gpg-agent
-          gnupg-dirmngr
-          gnupg-scdaemon
-          cryptsetup
-          e2fsprogs
-          pcsc-lite
-          pcsc-lite-libs
-          pcsc-lite-openrc
-          ccid
-          pinentry
-          yubikey-manager
-          ykpers
-          EOF
-
-          cd apkovl && tar -czf ../rootfs/localhost.apkovl.tar.gz . && cd ..
-
-          # 2. Regenerate clean APKINDEX from our downloaded packages
-          docker run --rm \
-            --platform linux/arm/v7 \
-            -v $(pwd)/rootfs/apks/armv7:/pkgs \
-            arm32v7/alpine \
-            sh -c "apk index --allow-untrusted \
-              -o /pkgs/APKINDEX.tar.gz /pkgs/*.apk"
-
-              
-      - name: Create apkovl with config files
-        run: |
-          mkdir -p apkovl/etc/apk
+          # GPG configs
           mkdir -p apkovl/root/.gnupg
-
-          cat > apkovl/etc/apk/world << 'EOF'
-          gnupg
-          gnupg-dirmngr
-          gpg-agent
-          gnupg-scdaemon
-          cryptsetup
-          e2fsprogs
-          pcsc-lite
-          pcsc-lite-libs
-          pcsc-lite-openrc
-          ccid
-          pinentry
-          yubikey-manager
-          ykpers
-          EOF
-
-          # Generate default gpg.conf
           cat > apkovl/root/.gnupg/gpg.conf << 'EOF'
           personal-cipher-preferences AES256 AES192 AES
           personal-digest-preferences SHA512 SHA384 SHA256
@@ -132,11 +130,9 @@ jobs:
           use-agent
           throw-keyids
           EOF
-
-          # Generate default gpg-agent.conf
-          cat > apkovl/root/.gnupg/gpg-agent.conf << 'EOF'
+          
+                    cat > apkovl/root/.gnupg/gpg-agent.conf << 'EOF'
           enable-ssh-support
-          ttyname $GPG_TTY
           default-cache-ttl 60
           max-cache-ttl 120
           pinentry-program /usr/bin/pinentry
@@ -146,51 +142,10 @@ jobs:
           chmod 600 apkovl/root/.gnupg/gpg.conf
           chmod 600 apkovl/root/.gnupg/gpg-agent.conf
 
+          # Merge into apkovl
           cd apkovl
           tar -czf ../rootfs/localhost.apkovl.tar.gz .
 
-      - name: Install packages into image
-        run: |
-          docker run --rm --privileged tonistiigi/binfmt --install arm
-
-          docker run --rm \
-            --platform linux/arm/v7 \
-            --privileged \
-            -v $(pwd)/rootfs/apks/armv7:/pkgs \
-            -v $(pwd)/rootfs:/rootfs \
-            arm32v7/alpine \
-            sh -c "
-              # Clear existing world/repo state
-              echo '' > /etc/apk/repositories
-              rm -f /etc/apk/world
-
-              # Build fresh index
-              mkdir -p /local/armv7
-              cp /pkgs/*.apk /local/armv7/
-              apk index -vU --allow-untrusted \
-                -o /local/armv7/APKINDEX.tar.gz \
-                /local/armv7/*.apk
-
-              echo '/local' > /etc/apk/repositories
-
-              # Install with clean state
-              apk add --allow-untrusted --force-overwrite \
-                gnupg gpg-agent gnupg-dirmngr gnupg-scdaemon \
-                cryptsetup e2fsprogs pcsc-lite pcsc-lite-libs \
-                pcsc-lite-openrc ccid pinentry \
-                yubikey-manager ykpers
-
-              # Export installed filesystem
-              tar -czf /rootfs/localhost.apkovl.tar.gz \
-                -C / \
-                etc/apk/world \
-                usr/bin/gpg \
-                usr/bin/gpg-agent \
-                usr/lib/gnupg \
-                usr/bin/ykman \
-                usr/bin/ykpers
-            "
-            
       - name: Repack image
         run: |
           tar -czf alpine-rpi-custom.tar.gz -C rootfs .
