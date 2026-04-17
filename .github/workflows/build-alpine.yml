@@ -45,37 +45,21 @@ jobs:
                 yubikey-manager \
                 ykpers
 
-              # Save installed package list
-              cp /etc/apk/world /output/world
+              # Get exact file list from apk and use it to build tarball
+              apk info -L \
+                gnupg gpg-agent gnupg-dirmngr gnupg-scdaemon \
+                cryptsetup e2fsprogs pcsc-lite pcsc-lite-libs \
+                pcsc-lite-openrc ccid pinentry \
+                yubikey-manager ykpers \
+                | grep -v '/$' > /tmp/filelist.txt
 
-              # Export all installed files as apkovl
-              cd /
+              # Add world file manually
+              echo 'etc/apk/world' >> /tmp/filelist.txt
+              echo 'etc/apk/protected_paths.d' >> /tmp/filelist.txt
+
               tar -czf /output/localhost.apkovl.tar.gz \
-                etc/apk/world \
-                etc/apk/protected_paths.d \
-                usr/bin/gpg \
-                usr/bin/gpg2 \
-                usr/bin/gpg-agent \
-                usr/bin/gpgconf \
-                usr/bin/gpgsm \
-                usr/bin/gpgv \
-                usr/bin/ykman \
-                usr/bin/ykpers \
-                usr/lib/gnupg \
-                usr/lib/engines-3 \
-                usr/share/gnupg \
-                usr/lib/libgpg-error.so.0 \
-                usr/lib/libgcrypt.so.20 \
-                usr/lib/libassuan.so.0 \
-                usr/lib/libksba.so.8 \
-                usr/lib/libnpth.so.0 \
-                lib/libcryptsetup.so.12 \
-                lib/libdevmapper.so.1.02 \
-                sbin/cryptsetup \
-                sbin/e2fsck \
-                sbin/mkfs.ext2 \
-                usr/lib/pcsc \
-                usr/sbin/pcscd
+                -C / \
+                --files-from=/tmp/filelist.txt
             "
 
       - name: Inject apkovl and gpg configs into image
