@@ -109,36 +109,35 @@ jobs:
           tar -czf ../rootfs/localhost.apkovl.tar.gz .
       - name: Install packages into image
         run: |
-          # Register ARM emulation
           docker run --rm --privileged tonistiigi/binfmt --install arm
 
-          # Extract Alpine's root from the apkovl/boot structure
-          # We'll use a minimal Alpine container as our base instead
           docker run --rm \
             --platform linux/arm/v7 \
             --privileged \
             -v $(pwd)/rootfs:/rootfs \
             arm32v7/alpine \
             sh -c "
-              # Copy apks into container cache
-              mkdir -p /etc/apk/cache
-              cp /rootfs/apks/armv7/*.apk /etc/apk/cache/
+              mkdir -p /etc/apk/cache/armv7
+              cp /rootfs/apks/armv7/*.apk /etc/apk/cache/armv7/
               
-              # Rebuild index from local packages
               apk index -vU --allow-untrusted \
-                -o /etc/apk/cache/APKINDEX.tar.gz \
-                /etc/apk/cache/*.apk
+                -o /etc/apk/cache/armv7/APKINDEX.tar.gz \
+                /etc/apk/cache/armv7/*.apk
               
-              echo /etc/apk/cache > /etc/apk/repositories
+              echo '/etc/apk/cache' > /etc/apk/repositories
               
-              # Actually install
+              apk update --allow-untrusted
               apk add --allow-untrusted \
-                gnupg gpg-agent cryptsetup \
-                e2fsprogs pcsc-lite ccid \
-                pinentry yubikey-manager ykpers
+                gnupg gpg-agent gnupg-dirmngr gnupg-scdaemon \
+                cryptsetup e2fsprogs pcsc-lite pcsc-lite-libs \
+                pcsc-lite-openrc ccid pinentry \
+                yubikey-manager ykpers
               
-              # Save installed state as apkovl
-              lbu pkg /rootfs/localhost.apkovl.tar.gz
+              # Save the installed state
+              tar -czf /rootfs/localhost.apkovl.tar.gz \
+                /etc/apk/world \
+                /var/lib/apk \
+                /lib/apk
             "
             
       - name: Repack image
