@@ -27,13 +27,12 @@ jobs:
       - name: Download packages for armv7
         run: |
           mkdir -p rootfs/apks/armv7
+          
           docker run --rm \
             --platform linux/arm/v7 \
             -v $(pwd)/rootfs/apks/armv7:/packages \
             arm32v7/alpine \
-            sh -c "apk update && \
-              cp /var/cache/apk/*.tar.gz /packages/ && \
-              apk fetch -R -o /packages \
+            sh -c "apk update && apk fetch -R --no-cache -o /packages \
               gnupg \
               gnupg-dirmngr \
               gpg-agent \
@@ -46,7 +45,11 @@ jobs:
               ccid \
               pinentry \
               yubikey-manager \
-              ykpers"
+              ykpers && \
+              # Remove older duplicate versions
+              for pkg in libcrypto3 libssl3 libblkid libuuid musl zlib gnutls; do
+                ls /packages/\${pkg}-*.apk 2>/dev/null | sort -V | head -n -1 | xargs rm -f
+              done"
 
       - name: Create apkovl with config files
         run: |
