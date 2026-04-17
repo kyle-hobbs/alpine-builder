@@ -51,6 +51,8 @@ jobs:
                 cryptsetup e2fsprogs pcsc-lite pcsc-lite-libs \
                 pcsc-lite-openrc ccid pinentry \
                 yubikey-manager ykpers \
+                | grep -v 'contains:' \
+                | grep -v '^$' \
                 | grep -v '/$' > /tmp/filelist.txt
 
               # Add world file manually
