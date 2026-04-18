@@ -21,9 +21,11 @@ jobs:
             -e ARCH=armv7 \
             -e SIMPLE_IMAGE=yes \
             ghcr.io/raspi-alpine/builder
+          ls output/
+          ls
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: alpine-rpi-custom
-          path: output/sdcard.img.gz
+          path: output/*.img.gz
