@@ -11,66 +11,31 @@ jobs:
 
       - name: Enable ARM emulation
         run: |
-          docker run --rm --privileged tonistiigi/binfmt --install arm
+          docker run --privileged --rm multiarch/qemu-user-static --persistent yes
 
-      - name: Download Alpine Pi image
+      - name: Create custom image script
         run: |
-          wget https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/armv7/alpine-rpi-3.23.3-armv7.tar.gz
-          mkdir -p rootfs
-          tar -xzf alpine-rpi-3.23.3-armv7.tar.gz -C rootfs
+          mkdir -p input
+          cat > input/image.sh << 'EOF'
+          apk add --no-cache \
+            gnupg \
+            gpg-agent \
+            gnupg-dirmngr \
+            gnupg-scdaemon \
+            cryptsetup \
+            e2fsprogs \
+            pcsc-lite \
+            pcsc-lite-libs \
+            pcsc-lite-openrc \
+            ccid \
+            pinentry \
+            yubikey-manager \
+            ykpers
 
-      - name: Download packages into local cache
-        run: |
-          mkdir -p rootfs/apks/armv7
+          mkdir -p /root/.gnupg
+          chmod 700 /root/.gnupg
 
-          docker run --rm \
-            --platform linux/arm/v7 \
-            -v $(pwd)/rootfs/apks/armv7:/packages \
-            arm32v7/alpine \
-            sh -c "
-              apk update
-              apk fetch -R --no-cache -o /packages \
-                gnupg gpg-agent gnupg-dirmngr gnupg-scdaemon \
-                cryptsetup e2fsprogs pcsc-lite pcsc-lite-libs \
-                pcsc-lite-openrc ccid pinentry \
-                yubikey-manager ykpers
-
-              apk index \
-                -o /packages/APKINDEX.tar.gz \
-                /packages/*.apk
-            "
-
-      - name: Build apkovl
-        run: |
-          mkdir -p apkovl/etc/apk/conf.d
-          mkdir -p apkovl/root/.gnupg
-
-          # Local repo on SD card
-          echo '/media/mmcblk0p1/apks' > apkovl/etc/apk/repositories
-
-          # Allow untrusted local index
-          echo 'allow-untrusted' > apkovl/etc/apk/conf.d/local.conf
-
-          # World file - packages to install on boot
-          cat > apkovl/etc/apk/world << 'EOF'
-          alpine-base
-          gnupg
-          gpg-agent
-          gnupg-dirmngr
-          gnupg-scdaemon
-          cryptsetup
-          e2fsprogs
-          pcsc-lite
-          pcsc-lite-libs
-          pcsc-lite-openrc
-          ccid
-          pinentry
-          yubikey-manager
-          ykpers
-          EOF
-
-          # GPG config
-          cat > apkovl/root/.gnupg/gpg.conf << 'EOF'
+          cat > /root/.gnupg/gpg.conf << 'GPGCONF'
           personal-cipher-preferences AES256 AES192 AES
           personal-digest-preferences SHA512 SHA384 SHA256
           cert-digest-algo SHA512
@@ -81,29 +46,30 @@ jobs:
           keyid-format 0xlong
           use-agent
           throw-keyids
-          EOF
+          GPGCONF
 
-          # GPG agent config
-          cat > apkovl/root/.gnupg/gpg-agent.conf << 'EOF'
+          cat > /root/.gnupg/gpg-agent.conf << 'AGENTCONF'
           enable-ssh-support
           default-cache-ttl 60
           max-cache-ttl 120
           pinentry-program /usr/bin/pinentry
+          AGENTCONF
+
+          chmod 600 /root/.gnupg/gpg.conf
+          chmod 600 /root/.gnupg/gpg-agent.conf
           EOF
+          chmod +x input/image.sh
 
-          chmod 700 apkovl/root/.gnupg
-          chmod 600 apkovl/root/.gnupg/gpg.conf
-          chmod 600 apkovl/root/.gnupg/gpg-agent.conf
-
-          cd apkovl
-          tar -czf ../rootfs/localhost.apkovl.tar.gz .
-
-      - name: Repack image
+      - name: Build image
         run: |
-          tar -czf alpine-rpi-custom.tar.gz -C rootfs .
+          mkdir -p output
+          docker run --rm \
+            -v $PWD/input:/input \
+            -v $PWD/output:/output \
+            ghcr.io/raspi-alpine/builder
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: alpine-rpi-custom
-          path: alpine-rpi-custom.tar.gz
+          path: output/sdcard.img.gz
