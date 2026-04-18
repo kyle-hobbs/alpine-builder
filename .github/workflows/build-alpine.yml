@@ -79,6 +79,7 @@ jobs:
             -v $PWD/input:/input \
             -v $PWD/output:/output \
             -e ARCH=armv7 \
+            -e SIMPLE_IMAGE=yes \
             ghcr.io/raspi-alpine/builder
 
       - name: Upload artifact
