@@ -16,16 +16,19 @@ jobs:
       - name: Create custom image script
         run: |
           mkdir -p input
-          cat > input/image.sh << 'EOF'
-          # Set root password
-          echo "root:root" | chpasswd
-          # Fix resolution
-          cat >> /boot/config.txt << 'HDMI'
+          mkdir -p input/m4
+
+          # HDMI resolution config (replaces default hdmi section in config.txt)
+          cat > input/m4/hdmi.m4 << 'EOF'
           disable_overscan=1
           hdmi_force_hotplug=1
           hdmi_group=2
           hdmi_mode=82
-          HDMI
+          EOF
+
+          cat > input/image.sh << 'EOF'
+          echo "root:root" | chpasswd
+
           apk add --no-cache \
             gnupg \
             gpg-agent \
