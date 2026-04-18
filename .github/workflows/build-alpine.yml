@@ -17,6 +17,15 @@ jobs:
         run: |
           mkdir -p input
           cat > input/image.sh << 'EOF'
+          # Set root password
+          echo "root:root" | chpasswd
+          # Fix resolution
+          cat >> /boot/config.txt << 'HDMI'
+          disable_overscan=1
+          hdmi_force_hotplug=1
+          hdmi_group=2
+          hdmi_mode=82
+          HDMI
           apk add --no-cache \
             gnupg \
             gpg-agent \
