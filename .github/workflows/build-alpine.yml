@@ -1,7 +1,5 @@
 name: Build Alpine Pi Image
-
 on: [push, workflow_dispatch]
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -13,67 +11,9 @@ jobs:
         run: |
           docker run --privileged --rm multiarch/qemu-user-static --persistent yes
 
-      - name: Create custom image script
-        run: |
-          mkdir -p input
-          mkdir -p input/m4
-
-          # HDMI resolution config (replaces default hdmi section in config.txt)
-          cat > input/m4/hdmi.m4 << 'EOF'
-          disable_overscan=1
-          hdmi_force_hotplug=1
-          hdmi_group=2
-          hdmi_mode=82
-          EOF
-
-          cat > input/image.sh << 'EOF'
-          echo "root:root" | chpasswd
-
-          apk add --no-cache \
-            gnupg \
-            gpg-agent \
-            gnupg-dirmngr \
-            gnupg-scdaemon \
-            cryptsetup \
-            e2fsprogs \
-            pcsc-lite \
-            pcsc-lite-libs \
-            pcsc-lite-openrc \
-            ccid \
-            pinentry \
-            yubikey-manager \
-            ykpers
-
-          mkdir -p /root/.gnupg
-          chmod 700 /root/.gnupg
-
-          cat > /root/.gnupg/gpg.conf << 'GPGCONF'
-          personal-cipher-preferences AES256 AES192 AES
-          personal-digest-preferences SHA512 SHA384 SHA256
-          cert-digest-algo SHA512
-          charset utf-8
-          fixed-list-mode
-          no-comments
-          no-emit-version
-          keyid-format 0xlong
-          use-agent
-          throw-keyids
-          GPGCONF
-
-          cat > /root/.gnupg/gpg-agent.conf << 'AGENTCONF'
-          enable-ssh-support
-          default-cache-ttl 60
-          max-cache-ttl 120
-          pinentry-program /usr/bin/pinentry
-          AGENTCONF
-
-          chmod 600 /root/.gnupg/gpg.conf
-          chmod 600 /root/.gnupg/gpg-agent.conf
-          EOF
-          chmod +x input/image.sh
-
       - name: Build image
         run: |
+          chmod +x input/image.sh
           mkdir -p output
           docker run --rm \
             -v $PWD/input:/input \
