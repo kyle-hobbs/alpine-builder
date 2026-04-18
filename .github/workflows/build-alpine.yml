@@ -12,6 +12,7 @@ jobs:
           docker run --privileged --rm multiarch/qemu-user-static --persistent yes
 
       - name: Build image
+        timeout-minutes: 15
         run: |
           chmod +x input/image.sh
           mkdir -p output
@@ -20,6 +21,7 @@ jobs:
             -v $PWD/output:/output \
             -e ARCH=armv7 \
             -e SIMPLE_IMAGE=yes \
+            -e VERBOSE=1 \
             ghcr.io/raspi-alpine/builder
           ls output/
           ls
