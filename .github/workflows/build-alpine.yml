@@ -11,22 +11,139 @@ jobs:
         run: |
           docker run --privileged --rm multiarch/qemu-user-static --persistent yes
 
-      - name: Build image
+      - name: Download Alpine Pi tarball
         run: |
-          chmod +x input/image.sh
+          wget https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/armv7/alpine-rpi-3.21.7-armv7.tar.gz
+          mkdir -p rootfs
+          tar -xzf alpine-rpi-3.21.7-armv7.tar.gz -C rootfs
+
+      - name: Install packages and build apkovl
+        run: |
           mkdir -p output
+
           docker run --rm \
-            -v $PWD/input:/input \
-            -v $PWD/output:/output \
-            -e ARCH=armv7 \
-            -e SIMPLE_IMAGE=yes \
-            -e UBOOT_VERSION="" \
-            ghcr.io/raspi-alpine/builder
-          ls output/
-          ls
+            --platform linux/arm/v7 \
+            --privileged \
+            -v $(pwd)/output:/output \
+            arm32v7/alpine \
+            sh -c "
+              apk update
+              apk add --no-cache \
+                gnupg \
+                gpg-agent \
+                gnupg-dirmngr \
+                gnupg-scdaemon \
+                cryptsetup \
+                e2fsprogs \
+                pcsc-lite \
+                pcsc-lite-libs \
+                pcsc-lite-openrc \
+                ccid \
+                pinentry \
+                yubikey-manager \
+                ykpers
+
+              # Get file list and build apkovl
+              apk info -L \
+                gnupg gpg-agent gnupg-dirmngr gnupg-scdaemon \
+                cryptsetup e2fsprogs pcsc-lite pcsc-lite-libs \
+                pcsc-lite-openrc ccid pinentry \
+                yubikey-manager ykpers \
+                | grep -v 'contains:' \
+                | grep -v '^\$' \
+                | grep -v '/\$' > /tmp/filelist.txt
+
+              echo 'etc/apk/world' >> /tmp/filelist.txt
+
+              tar -czf /output/localhost.apkovl.tar.gz \
+                -C / \
+                --files-from=/tmp/filelist.txt
+            "
+
+      - name: Build apkovl etc config
+        run: |
+          mkdir -p apkovl/etc/apk
+          mkdir -p apkovl/root/.gnupg
+
+          # Set root password
+          echo 'root:root' | openssl passwd -6 -stdin | \
+            awk '{print "root:"$1":0:0:root:/root:/bin/sh"}' \
+            > apkovl/etc/shadow
+
+          # Local repo pointing at SD card
+          echo '/media/mmcblk0p1/apks' > apkovl/etc/apk/repositories
+
+          cat > apkovl/etc/apk/world << 'EOF'
+          alpine-base
+          gnupg
+          gpg-agent
+          gnupg-dirmngr
+          gnupg-scdaemon
+          cryptsetup
+          e2fsprogs
+          pcsc-lite
+          pcsc-lite-libs
+          pcsc-lite-openrc
+          ccid
+          pinentry
+          yubikey-manager
+          ykpers
+          EOF
+
+          cat > apkovl/root/.gnupg/gpg.conf << 'EOF'
+          personal-cipher-preferences AES256 AES192 AES
+          personal-digest-preferences SHA512 SHA384 SHA256
+          cert-digest-algo SHA512
+          charset utf-8
+          fixed-list-mode
+          no-comments
+          no-emit-version
+          keyid-format 0xlong
+          use-agent
+          throw-keyids
+          EOF
+
+          cat > apkovl/root/.gnupg/gpg-agent.conf << 'EOF'
+          enable-ssh-support
+          default-cache-ttl 60
+          max-cache-ttl 120
+          pinentry-program /usr/bin/pinentry
+          EOF
+
+          chmod 700 apkovl/root/.gnupg
+          chmod 600 apkovl/root/.gnupg/gpg.conf
+          chmod 600 apkovl/root/.gnupg/gpg-agent.conf
+
+          cd apkovl
+          tar -czf ../output/localhost.apkovl.tar.gz .
+
+      - name: Download packages for offline use
+        run: |
+          mkdir -p rootfs/apks/armv7
+
+          docker run --rm \
+            --platform linux/arm/v7 \
+            -v $(pwd)/rootfs/apks/armv7:/packages \
+            arm32v7/alpine \
+            sh -c "
+              apk update
+              apk fetch -R --no-cache -o /packages \
+                gnupg gpg-agent gnupg-dirmngr gnupg-scdaemon \
+                cryptsetup e2fsprogs pcsc-lite pcsc-lite-libs \
+                pcsc-lite-openrc ccid pinentry \
+                yubikey-manager ykpers
+              apk index \
+                -o /packages/APKINDEX.tar.gz \
+                /packages/*.apk
+            "
+
+      - name: Assemble final image
+        run: |
+          cp output/localhost.apkovl.tar.gz rootfs/
+          tar -czf alpine-rpi-custom.tar.gz -C rootfs .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: alpine-rpi-custom
-          path: output/*.img.gz
+          path: alpine-rpi-custom.tar.gz
