@@ -1,0 +1,14 @@
+alpine-base
+gnupg
+gpg-agent
+gnupg-dirmngr
+gnupg-scdaemon
+cryptsetup
+e2fsprogs
+pcsc-lite
+pcsc-lite-libs
+pcsc-lite-openrc
+ccid
+pinentry
+yubikey-manager
+ykpers
