@@ -17,7 +17,7 @@ jobs:
           mkdir -p rootfs
           tar -xzf alpine-rpi-3.21.7-armv7.tar.gz -C rootfs
 
-- name: Install packages and build apkovl
+      - name: Install packages and build apkovl
         run: |
           mkdir -p output
 
@@ -59,7 +59,6 @@ jobs:
                 --files-from=/tmp/filelist.txt
             "
 
-          # Fix permissions so next steps can write to output
           sudo chown -R $USER:$USER output/
 
       - name: Build apkovl etc config
@@ -67,50 +66,15 @@ jobs:
           mkdir -p apkovl/etc/apk
           mkdir -p apkovl/root/.gnupg
 
-          # Set root password
           echo 'root:root' | openssl passwd -6 -stdin | \
             awk '{print "root:"$1":0:0:root:/root:/bin/sh"}' \
             > apkovl/etc/shadow
 
-          # Local repo pointing at SD card
           echo '/media/mmcblk0p1/apks' > apkovl/etc/apk/repositories
 
-          cat > apkovl/etc/apk/world << 'EOF'
-          alpine-base
-          gnupg
-          gpg-agent
-          gnupg-dirmngr
-          gnupg-scdaemon
-          cryptsetup
-          e2fsprogs
-          pcsc-lite
-          pcsc-lite-libs
-          pcsc-lite-openrc
-          ccid
-          pinentry
-          yubikey-manager
-          ykpers
-          EOF
-
-          cat > apkovl/root/.gnupg/gpg.conf << 'EOF'
-          personal-cipher-preferences AES256 AES192 AES
-          personal-digest-preferences SHA512 SHA384 SHA256
-          cert-digest-algo SHA512
-          charset utf-8
-          fixed-list-mode
-          no-comments
-          no-emit-version
-          keyid-format 0xlong
-          use-agent
-          throw-keyids
-          EOF
-
-          cat > apkovl/root/.gnupg/gpg-agent.conf << 'EOF'
-          enable-ssh-support
-          default-cache-ttl 60
-          max-cache-ttl 120
-          pinentry-program /usr/bin/pinentry
-          EOF
+          cp input/apk-world apkovl/etc/apk/world
+          cp input/gpg.conf apkovl/root/.gnupg/gpg.conf
+          cp input/gpg-agent.conf apkovl/root/.gnupg/gpg-agent.conf
 
           chmod 700 apkovl/root/.gnupg
           chmod 600 apkovl/root/.gnupg/gpg.conf
