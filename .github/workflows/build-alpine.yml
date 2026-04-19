@@ -17,7 +17,7 @@ jobs:
           mkdir -p rootfs
           tar -xzf alpine-rpi-3.21.7-armv7.tar.gz -C rootfs
 
-      - name: Install packages and build apkovl
+- name: Install packages and build apkovl
         run: |
           mkdir -p output
 
@@ -43,15 +43,14 @@ jobs:
                 yubikey-manager \
                 ykpers
 
-              # Get file list and build apkovl
               apk info -L \
                 gnupg gpg-agent gnupg-dirmngr gnupg-scdaemon \
                 cryptsetup e2fsprogs pcsc-lite pcsc-lite-libs \
                 pcsc-lite-openrc ccid pinentry \
                 yubikey-manager ykpers \
                 | grep -v 'contains:' \
-                | grep -v '^\$' \
-                | grep -v '/\$' > /tmp/filelist.txt
+                | grep -v '^$' \
+                | grep -v '/$' > /tmp/filelist.txt
 
               echo 'etc/apk/world' >> /tmp/filelist.txt
 
@@ -59,6 +58,9 @@ jobs:
                 -C / \
                 --files-from=/tmp/filelist.txt
             "
+
+          # Fix permissions so next steps can write to output
+          sudo chown -R $USER:$USER output/
 
       - name: Build apkovl etc config
         run: |
