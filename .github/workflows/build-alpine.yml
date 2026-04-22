@@ -25,24 +25,19 @@ jobs:
 
       - name: Patch boot config for Pi 2B diskless mode
         run: |
-          # Append to existing config.txt - preserve tarball's kernel/initramfs lines
           cat >> rootfs/config.txt << 'EOF'
           enable_uart=1
           disable_overscan=1
           EOF
-          # Strip heredoc indentation and blank lines
           sed -i 's/^[[:space:]]*//' rootfs/config.txt
           sed -i '/^$/d' rootfs/config.txt
 
-          # cmdline.txt must be exactly one line, no leading/trailing whitespace
           EXISTING=$(tr -d '\n\r' < rootfs/cmdline.txt | sed 's/[[:space:]]*$//')
-          # Remove any previously appended diskless params to avoid duplicates
           CLEANED=$(echo "$EXISTING" \
             | sed 's/alpine_dev=[^ ]*//g' \
             | sed 's/apkovl=[^ ]*//g' \
             | sed 's/  */ /g' \
             | sed 's/[[:space:]]*$//')
-          # Write final cmdline
           printf '%s alpine_dev=mmcblk0p1:vfat apkovl=localhost.apkovl.tar.gz\n' "$CLEANED" \
             > rootfs/cmdline.txt
 
@@ -78,16 +73,36 @@ jobs:
                 pinentry \
                 yubikey-manager \
                 ykpers
-              apk index -o /packages/APKINDEX.tar.gz /packages/*.apk
             "
           sudo chown -R $USER:$USER rootfs/apks/
 
-      - name: Verify offline cache
+      - name: Pre-install packages into rootfs
         run: |
-          echo "=== APK cache count ==="
-          ls rootfs/apks/armv7/*.apk | wc -l
-          echo "=== APKINDEX present? ==="
-          tar -tzf rootfs/apks/armv7/APKINDEX.tar.gz | head -5
+          docker run --rm \
+            --platform linux/arm/v7 \
+            --privileged \
+            -v $(pwd)/rootfs:/mnt/rootfs \
+            -v $(pwd)/rootfs/apks/armv7:/packages \
+            arm32v7/alpine:3.23 \
+            sh -c "
+              apk add \
+                --root /mnt/rootfs \
+                --initdb \
+                --allow-untrusted \
+                --no-network \
+                --repositories-file /dev/null \
+                /packages/*.apk
+            "
+          sudo chown -R $USER:$USER rootfs/
+
+      - name: Verify install
+        run: |
+          echo "=== /sbin/init exists? ==="
+          ls -la rootfs/sbin/init
+          echo "=== installed packages ==="
+          cat rootfs/etc/apk/world 2>/dev/null || echo "no world file"
+          echo "=== rootfs size ==="
+          du -sh rootfs/
 
       - name: Build apkovl
         run: |
@@ -96,10 +111,10 @@ jobs:
           mkdir -p apkovl/etc/runlevels/boot
           mkdir -p apkovl/root/.gnupg
 
-          # Repository - FAT partition is mounted here during diskless init
+          # Repositories - still needed for future apk commands at runtime
           printf '/media/mmcblk0p1/apks\n' > apkovl/etc/apk/repositories
 
-          # world - no leading whitespace, one package per line
+          # world - packages already installed, this just tracks them
           cat > apkovl/etc/apk/world << 'EOF'
           alpine-base
           gnupg
@@ -116,7 +131,6 @@ jobs:
           yubikey-manager
           ykpers
           EOF
-          # Strip heredoc indentation from world file
           sed -i 's/^[[:space:]]*//' apkovl/etc/apk/world
 
           # /etc/passwd
@@ -163,7 +177,6 @@ jobs:
           chmod 700 apkovl/root/.gnupg
           chmod 600 apkovl/root/.gnupg/gpg.conf apkovl/root/.gnupg/gpg-agent.conf
 
-          # Pack apkovl - relative paths, no leading slash
           cd apkovl
           tar -czf ../rootfs/localhost.apkovl.tar.gz .
 
