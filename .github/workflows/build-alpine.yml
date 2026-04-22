@@ -60,10 +60,10 @@ jobs:
             -v $(pwd)/rootfs/apks/armv7:/packages \
             arm32v7/alpine:3.23 \
             sh -c "
+              set -e
               apk update
-              apk upgrade --no-cache
 
-              # Fetch all packages + deps into cache
+              # Fetch your packages
               apk fetch --recursive --no-cache -o /packages \
                 gnupg \
                 gnupg-dirmngr \
@@ -79,12 +79,21 @@ jobs:
                 yubikey-manager \
                 ykpers
 
-              # Wipe the tarball's existing apk db - it has pinned versions
-              # that conflict with current mirror packages
+              # Also fetch the conflicting packages at their current versions
+              # so the rootfs can be upgraded before we install
+              apk fetch --recursive --no-cache -o /packages \
+                openssl \
+                vlan \
+                ifupdown-ng \
+                network-extras
+
+              # Wipe stale apk db from the tarball entirely
               rm -rf /mnt/rootfs/lib/apk/db
+              rm -rf /mnt/rootfs/lib/apk/db.lock
               rm -f /mnt/rootfs/etc/apk/world
 
-              # Install everything fresh into rootfs
+              # Init fresh db and install ALL fetched packages at once
+              # so apk resolves versions consistently in one pass
               apk add \
                 --root /mnt/rootfs \
                 --initdb \
