@@ -60,6 +60,13 @@ jobs:
       - name: Download and pre-install packages into rootfs
         run: |
           mkdir -p rootfs/apks/armv7
+
+          # Do this on the HOST before Docker runs - eliminates any race/permission issue
+          # with deleting inside the container while it's mounted
+          sudo rm -rf rootfs/lib/apk/db
+          sudo rm -rf rootfs/lib/apk/db.lock  
+          sudo rm -f rootfs/etc/apk/world
+
           docker run --rm \
             --platform linux/arm/v7 \
             --privileged \
@@ -70,16 +77,11 @@ jobs:
               set -e
               apk update
 
-              # The arm32v7/alpine:3.23 container has 'vlan' in its world
-              # which conflicts with ifupdown-ng. Remove it first.
+              # Remove vlan from container's own world too
               apk del vlan 2>/dev/null || true
               sed -i '/^vlan$/d' /etc/apk/world
-
-              # Upgrade the container so its packages match the current mirror,
-              # eliminating openssl/libcrypto version skew before fetching.
               apk upgrade --no-cache
 
-              # Fetch all required packages + deps at now-consistent versions.
               apk fetch --recursive --no-cache -o /packages \
                 gnupg \
                 gnupg-dirmngr \
@@ -98,13 +100,7 @@ jobs:
                 ifupdown-ng \
                 alpine-base
 
-              # Wipe the tarball's stale apk db and world.
-              # The tarball world has 'vlan' pinned which conflicts with ifupdown-ng.
-              rm -rf /mnt/rootfs/lib/apk/db
-              rm -rf /mnt/rootfs/lib/apk/db.lock
-              rm -f /mnt/rootfs/etc/apk/world
-
-              # Install everything in one pass - apk resolves versions consistently.
+              # /mnt/rootfs/lib/apk/db and world already wiped on host above
               apk add \
                 --root /mnt/rootfs \
                 --initdb \
