@@ -1,5 +1,6 @@
 name: Build Alpine Pi Image
 on: [push, workflow_dispatch]
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -17,76 +18,28 @@ jobs:
           mkdir -p rootfs
           tar -xzf alpine-rpi-3.21.7-armv7.tar.gz -C rootfs
 
-      - name: Install packages and build apkovl
+      - name: Configure boot files for diskless/ramfs mode
         run: |
-          mkdir -p output
+          # cmdline.txt: console on HDMI (tty1), diskless mode, apkovl on FAT partition
+          cat > rootfs/cmdline.txt << 'EOF'
+          console=tty1 root=/dev/mmcblk0p1 modules=loop,squashfs,sd-mod,usb-storage quiet alpine_dev=mmcblk0p1:vfat apkovl=/localhost.apkovl.tar.gz
+          EOF
+          # Strip leading whitespace (heredoc indent artifact)
+          sed -i 's/^[[:space:]]*//' rootfs/cmdline.txt
 
-          docker run --rm \
-            --platform linux/arm/v7 \
-            --privileged \
-            -v $(pwd)/output:/output \
-            arm32v7/alpine \
-            sh -c "
-              apk update
-              apk add --no-cache \
-                gnupg \
-                gpg-agent \
-                gnupg-dirmngr \
-                gnupg-scdaemon \
-                cryptsetup \
-                e2fsprogs \
-                pcsc-lite \
-                pcsc-lite-libs \
-                pcsc-lite-openrc \
-                ccid \
-                pinentry \
-                yubikey-manager \
-                ykpers
-
-              apk info -L \
-                gnupg gpg-agent gnupg-dirmngr gnupg-scdaemon \
-                cryptsetup e2fsprogs pcsc-lite pcsc-lite-libs \
-                pcsc-lite-openrc ccid pinentry \
-                yubikey-manager ykpers \
-                | grep -v 'contains:' \
-                | grep -v '^$' \
-                | grep -v '/$' > /tmp/filelist.txt
-
-              echo 'etc/apk/world' >> /tmp/filelist.txt
-
-              tar -czf /output/localhost.apkovl.tar.gz \
-                -C / \
-                --files-from=/tmp/filelist.txt
-            "
-
-          sudo chown -R $USER:$USER output/
-
-      - name: Build apkovl etc config
-        run: |
-          mkdir -p apkovl/etc/apk
-          mkdir -p apkovl/root/.gnupg
-
-          echo 'root:root' | openssl passwd -6 -stdin | \
-            awk '{print "root:"$1":0:0:root:/root:/bin/sh"}' \
-            > apkovl/etc/shadow
-
-          echo '/media/mmcblk0p1/apks' > apkovl/etc/apk/repositories
-
-          cp input/apk-world apkovl/etc/apk/world
-          cp input/gpg.conf apkovl/root/.gnupg/gpg.conf
-          cp input/gpg-agent.conf apkovl/root/.gnupg/gpg-agent.conf
-
-          chmod 700 apkovl/root/.gnupg
-          chmod 600 apkovl/root/.gnupg/gpg.conf
-          chmod 600 apkovl/root/.gnupg/gpg-agent.conf
-
-          cd apkovl
-          tar -czf ../output/localhost.apkovl.tar.gz .
+          # config.txt: Pi 2B specific - no uart needed for HDMI output
+          cat > rootfs/config.txt << 'EOF'
+          # Pi 2B config
+          arm_control=0x200
+          kernel=boot/vmlinuz-rpi2
+          initramfs boot/initramfs-rpi2
+          disable_overscan=1
+          dtparam=audio=off
+          EOF
 
       - name: Download packages for offline use
         run: |
           mkdir -p rootfs/apks/armv7
-
           docker run --rm \
             --platform linux/arm/v7 \
             -v $(pwd)/rootfs/apks/armv7:/packages \
@@ -102,10 +55,78 @@ jobs:
                 -o /packages/APKINDEX.tar.gz \
                 /packages/*.apk
             "
+          sudo chown -R $USER:$USER rootfs/apks/
 
-      - name: Assemble final image
+      - name: Build apkovl
         run: |
-          cp output/localhost.apkovl.tar.gz rootfs/
+          mkdir -p apkovl/etc/apk
+          mkdir -p apkovl/etc/runlevels/default
+          mkdir -p apkovl/root/.gnupg
+
+          # Correct Alpine local repository path (FAT partition is mounted at /media/mmcblk0p1)
+          printf 'http://dl-cdn.alpinelinux.org/alpine/v3.21/main\n/media/mmcblk0p1/apks\n' \
+            > apkovl/etc/apk/repositories
+
+          # apk world - packages to install on boot
+          cat > apkovl/etc/apk/world << 'EOF'
+          alpine-base
+          gnupg
+          gpg-agent
+          gnupg-dirmngr
+          gnupg-scdaemon
+          cryptsetup
+          e2fsprogs
+          pcsc-lite
+          pcsc-lite-libs
+          pcsc-lite-openrc
+          ccid
+          pinentry
+          yubikey-manager
+          ykpers
+          EOF
+
+          # Correct /etc/shadow format: name:hash:lastchg:min:max:warn:inactive:expire:reserved
+          HASH=$(echo 'root' | openssl passwd -6 -stdin)
+          printf "root:%s:0:0:99999:7:::\n" "$HASH" > apkovl/etc/shadow
+          chmod 640 apkovl/etc/shadow
+
+          # Basic passwd so login works
+          cat > apkovl/etc/passwd << 'EOF'
+          root:x:0:0:root:/root:/bin/sh
+          EOF
+
+          # Enable sshd and pcscd at boot (optional but useful for headless fallback)
+          # touch apkovl/etc/runlevels/default/sshd
+          touch apkovl/etc/runlevels/default/pcscd
+
+          # GnuPG config - pull from your input/ files if present, else create defaults
+          if [ -f input/gpg.conf ]; then
+            cp input/gpg.conf apkovl/root/.gnupg/gpg.conf
+          else
+            cat > apkovl/root/.gnupg/gpg.conf << 'EOF'
+          use-agent
+          EOF
+          fi
+
+          if [ -f input/gpg-agent.conf ]; then
+            cp input/gpg-agent.conf apkovl/root/.gnupg/gpg-agent.conf
+          else
+            cat > apkovl/root/.gnupg/gpg-agent.conf << 'EOF'
+          enable-ssh-support
+          default-cache-ttl 600
+          max-cache-ttl 7200
+          EOF
+          fi
+
+          chmod 700 apkovl/root/.gnupg
+          chmod 600 apkovl/root/.gnupg/gpg.conf apkovl/root/.gnupg/gpg-agent.conf
+
+          # Pack the apkovl - paths must be relative, no leading slash
+          cd apkovl
+          tar -czf ../rootfs/localhost.apkovl.tar.gz .
+
+      - name: Assemble final image tarball
+        run: |
           tar -czf alpine-rpi-custom.tar.gz -C rootfs .
 
       - name: Upload artifact
