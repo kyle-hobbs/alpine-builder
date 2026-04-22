@@ -50,15 +50,19 @@ jobs:
         run: |
           docker run --privileged --rm tonistiigi/binfmt --install arm
 
-      - name: Download packages into offline cache
+      - name: Download and pre-install packages into rootfs
         run: |
           mkdir -p rootfs/apks/armv7
           docker run --rm \
             --platform linux/arm/v7 \
+            --privileged \
+            -v $(pwd)/rootfs:/mnt/rootfs \
             -v $(pwd)/rootfs/apks/armv7:/packages \
             arm32v7/alpine:3.23 \
             sh -c "
               apk update
+
+              # Fetch into cache
               apk fetch --recursive --no-cache -o /packages \
                 gnupg \
                 gnupg-dirmngr \
@@ -73,8 +77,17 @@ jobs:
                 pinentry \
                 yubikey-manager \
                 ykpers
+
+              # Install into rootfs in the same container/same apk version
+              apk add \
+                --root /mnt/rootfs \
+                --initdb \
+                --allow-untrusted \
+                --no-network \
+                --repositories-file /dev/null \
+                /packages/*.apk
             "
-          sudo chown -R $USER:$USER rootfs/apks/
+          sudo chown -R $USER:$USER rootfs/
 
       - name: Pre-install packages into rootfs
         run: |
