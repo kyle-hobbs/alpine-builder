@@ -140,3 +140,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: alpine-rpi-custom
+          path: alpine-rpi-custom.tar.gz
