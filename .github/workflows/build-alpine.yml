@@ -83,7 +83,6 @@ jobs:
               # so the rootfs can be upgraded before we install
               apk fetch --recursive --no-cache -o /packages \
                 openssl \
-                vlan \
                 ifupdown-ng \
                 network-extras
 
