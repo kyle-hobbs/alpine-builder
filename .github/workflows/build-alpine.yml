@@ -101,10 +101,23 @@ jobs:
 
       - name: Patch boot config for Pi 2B diskless mode
         run: |
-          # usercfg.txt is included by config.txt - safe place for our overrides
-          cat > rootfs/usercfg.txt << 'EOF'
-          kernel=boot/vmlinuz-rpi2
-          initramfs boot/initramfs-rpi2
+          # List what kernels are actually in the tarball so we use the right name
+          echo "=== available kernels ==="
+          ls rootfs/boot/
+
+          # usercfg.txt - use rpi2 kernel if it exists, fall back to rpi
+          if [ -f rootfs/boot/vmlinuz-rpi2 ]; then
+            KERNEL="vmlinuz-rpi2"
+            INITRAMFS="initramfs-rpi2"
+          else
+            KERNEL="vmlinuz-rpi"
+            INITRAMFS="initramfs-rpi"
+          fi
+          echo "Using kernel: $KERNEL"
+
+          cat > rootfs/usercfg.txt << EOF
+          kernel=boot/$KERNEL
+          initramfs boot/$INITRAMFS
           enable_uart=1
           disable_overscan=1
           EOF
@@ -121,8 +134,6 @@ jobs:
 
           echo "=== PATCHED cmdline.txt ==="
           cat -A rootfs/cmdline.txt
-          echo "=== config.txt ==="
-          cat rootfs/config.txt
           echo "=== usercfg.txt ==="
           cat rootfs/usercfg.txt
 
