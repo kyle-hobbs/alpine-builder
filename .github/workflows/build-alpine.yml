@@ -61,6 +61,7 @@ jobs:
             arm32v7/alpine:3.23 \
             sh -c "
               apk update
+              apk upgrade --no-cache
 
               # Fetch all packages + deps into cache
               apk fetch --recursive --no-cache -o /packages \
