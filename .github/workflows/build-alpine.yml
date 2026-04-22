@@ -201,7 +201,7 @@ jobs:
 
       - name: Assemble final image
         run: |
-          tar -czf alpine-rpi-custom.tar.gz -C rootfs .
+          sudo tar -czf alpine-rpi-custom.tar.gz -C rootfs .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
