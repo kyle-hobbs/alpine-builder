@@ -27,12 +27,15 @@ jobs:
 
       - name: Patch boot config for Pi 2B diskless mode
         run: |
-          cat >> rootfs/config.txt << 'EOF'
+          # config.txt includes usercfg.txt - use that for our overrides
+          # so we don't fight with the auto-generated config.txt on upgrades
+          cat > rootfs/usercfg.txt << 'EOF'
+          kernel=boot/vmlinuz-rpi2
+          initramfs boot/initramfs-rpi2
           enable_uart=1
           disable_overscan=1
           EOF
-          sed -i 's/^[[:space:]]*//' rootfs/config.txt
-          sed -i '/^$/d' rootfs/config.txt
+          sed -i 's/^[[:space:]]*//' rootfs/usercfg.txt
 
           EXISTING=$(tr -d '\n\r' < rootfs/cmdline.txt | sed 's/[[:space:]]*$//')
           CLEANED=$(echo "$EXISTING" \
@@ -45,8 +48,10 @@ jobs:
 
           echo "=== PATCHED cmdline.txt ==="
           cat -A rootfs/cmdline.txt
-          echo "=== PATCHED config.txt ==="
+          echo "=== config.txt ==="
           cat rootfs/config.txt
+          echo "=== usercfg.txt ==="
+          cat rootfs/usercfg.txt
 
       - name: Enable ARM emulation
         run: |
@@ -65,7 +70,16 @@ jobs:
               set -e
               apk update
 
-              # Fetch your packages + all deps
+              # The arm32v7/alpine:3.23 container has 'vlan' in its world
+              # which conflicts with ifupdown-ng. Remove it first.
+              apk del vlan 2>/dev/null || true
+              sed -i '/^vlan$/d' /etc/apk/world
+
+              # Upgrade the container so its packages match the current mirror,
+              # eliminating openssl/libcrypto version skew before fetching.
+              apk upgrade --no-cache
+
+              # Fetch all required packages + deps at now-consistent versions.
               apk fetch --recursive --no-cache -o /packages \
                 gnupg \
                 gnupg-dirmngr \
@@ -79,27 +93,18 @@ jobs:
                 ccid \
                 pinentry \
                 yubikey-manager \
-                ykpers
-
-              # Fetch updated versions of packages that conflict in the tarball's world.
-              # vlan conflicts with ifupdown-ng - fetch ifupdown-ng (which has vlan built in)
-              # and network-extras but NOT vlan standalone package.
-              # Also fetch openssl and alpine-base to ensure consistent versions.
-              apk fetch --recursive --no-cache -o /packages \
+                ykpers \
                 openssl \
                 ifupdown-ng \
                 alpine-base
 
-              # Wipe the tarball's stale apk db and world completely.
-              # The world file references 'vlan' which hard-conflicts with ifupdown-ng.
-              # We rebuild from scratch so apk has no memory of the old pins.
+              # Wipe the tarball's stale apk db and world.
+              # The tarball world has 'vlan' pinned which conflicts with ifupdown-ng.
               rm -rf /mnt/rootfs/lib/apk/db
               rm -rf /mnt/rootfs/lib/apk/db.lock
               rm -f /mnt/rootfs/etc/apk/world
 
-              # Install all fetched packages in one pass into the rootfs.
-              # Single pass means apk resolves all versions consistently
-              # with no old pinned state to fight against.
+              # Install everything in one pass - apk resolves versions consistently.
               apk add \
                 --root /mnt/rootfs \
                 --initdb \
@@ -118,8 +123,8 @@ jobs:
           cat rootfs/etc/apk/world 2>/dev/null || echo "no world file"
           echo "=== rootfs size ==="
           du -sh rootfs/
-          echo "=== check for vlan conflict ==="
-          cat rootfs/lib/apk/db/installed 2>/dev/null | grep -E "^P:(vlan|ifupdown-ng|network-extras)" || echo "grep done"
+          echo "=== vlan/ifupdown-ng check ==="
+          grep -E "^P:(vlan|ifupdown-ng|network-extras)" rootfs/lib/apk/db/installed 2>/dev/null || echo "grep done"
 
       - name: Build apkovl
         run: |
@@ -130,7 +135,6 @@ jobs:
 
           printf '/media/mmcblk0p1/apks\n' > apkovl/etc/apk/repositories
 
-          # world - must match what we actually installed, no vlan
           cat > apkovl/etc/apk/world << 'EOF'
           alpine-base
           gnupg
@@ -152,6 +156,7 @@ jobs:
           cat > apkovl/etc/passwd << 'EOF'
           root:x:0:0:root:/root:/bin/sh
           EOF
+          sed -i 's/^[[:space:]]*//' apkovl/etc/passwd
 
           HASH=$(printf 'root' | openssl passwd -6 -stdin)
           printf "root:%s:0:0:99999:7:::\n" "$HASH" > apkovl/etc/shadow
