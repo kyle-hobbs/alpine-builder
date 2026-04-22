@@ -111,10 +111,8 @@ jobs:
           mkdir -p apkovl/etc/runlevels/boot
           mkdir -p apkovl/root/.gnupg
 
-          # Repositories - still needed for future apk commands at runtime
           printf '/media/mmcblk0p1/apks\n' > apkovl/etc/apk/repositories
 
-          # world - packages already installed, this just tracks them
           cat > apkovl/etc/apk/world << 'EOF'
           alpine-base
           gnupg
@@ -133,20 +131,16 @@ jobs:
           EOF
           sed -i 's/^[[:space:]]*//' apkovl/etc/apk/world
 
-          # /etc/passwd
           cat > apkovl/etc/passwd << 'EOF'
           root:x:0:0:root:/root:/bin/sh
           EOF
 
-          # /etc/shadow - password is "root"
           HASH=$(printf 'root' | openssl passwd -6 -stdin)
           printf "root:%s:0:0:99999:7:::\n" "$HASH" > apkovl/etc/shadow
           chmod 640 apkovl/etc/shadow
 
-          # Runlevels
           touch apkovl/etc/runlevels/default/pcscd
 
-          # GnuPG config
           cat > apkovl/root/.gnupg/gpg.conf << 'EOF'
           personal-cipher-preferences AES256 AES192 AES
           personal-digest-preferences SHA512 SHA384 SHA256
