@@ -14,21 +14,94 @@ jobs:
           mkdir -p rootfs
           tar -xzf alpine-rpi-3.23.3-armv7.tar.gz -C rootfs
 
-      - name: Debug original boot files
-        run: |
           echo "=== ORIGINAL cmdline.txt ==="
           cat -A rootfs/cmdline.txt
           echo "=== ORIGINAL config.txt ==="
           cat rootfs/config.txt
-          echo "=== rootfs root files ==="
-          ls -la rootfs/
           echo "=== original world ==="
           cat rootfs/etc/apk/world 2>/dev/null || echo "no world file"
+          echo "=== rootfs root files ==="
+          ls -la rootfs/
+
+      - name: Enable ARM emulation
+        run: |
+          docker run --privileged --rm tonistiigi/binfmt --install arm
+
+      - name: Download and pre-install packages into rootfs
+        run: |
+          mkdir -p rootfs/apks/armv7
+
+          # Wipe stale apk db on the HOST before Docker runs.
+          # The tarball world pins 'vlan' which conflicts with ifupdown-ng.
+          # We wipe it so apk starts completely fresh with no prior state.
+          sudo rm -rf rootfs/lib/apk/db
+          sudo rm -f rootfs/etc/apk/world
+
+          docker run --rm \
+            --platform linux/arm/v7 \
+            --privileged \
+            -v $(pwd)/rootfs:/mnt/rootfs \
+            -v $(pwd)/rootfs/apks/armv7:/packages \
+            arm32v7/alpine:3.23 \
+            sh -c "
+              set -e
+              apk update
+
+              # Strip vlan from container world and upgrade so container packages
+              # match the mirror - prevents version skew during fetch
+              sed -i '/^vlan$/d' /etc/apk/world
+              apk fix 2>/dev/null || true
+              apk upgrade --no-cache
+
+              # Fetch ONLY our custom packages and their deps.
+              # Do NOT fetch alpine-base/ifupdown-ng/network-extras/vlan -
+              # those are the conflict chain. The tarball already has a working
+              # base system; we only need to add our packages on top.
+              apk fetch --recursive --no-cache -o /packages \
+                gnupg \
+                gnupg-dirmngr \
+                gpg-agent \
+                gnupg-scdaemon \
+                cryptsetup \
+                e2fsprogs \
+                pcsc-lite \
+                pcsc-lite-libs \
+                pcsc-lite-openrc \
+                ccid \
+                pinentry \
+                yubikey-manager \
+                ykpers
+
+              # Install into rootfs with --initdb (fresh db) but
+              # with --force-broken-world so apk does not try to
+              # re-resolve or reinstall base system packages
+              apk add \
+                --root /mnt/rootfs \
+                --initdb \
+                --allow-untrusted \
+                --no-network \
+                --force-broken-world \
+                --repositories-file /dev/null \
+                /packages/*.apk
+            "
+          sudo chown -R $USER:$USER rootfs/
+
+      - name: Verify install
+        run: |
+          echo "=== /sbin/init exists? ==="
+          ls -la rootfs/sbin/init
+          echo "=== world file ==="
+          cat rootfs/etc/apk/world 2>/dev/null || echo "no world file"
+          echo "=== rootfs size ==="
+          du -sh rootfs/
+          echo "=== gnupg present? ==="
+          ls rootfs/usr/bin/gpg 2>/dev/null && echo "YES" || echo "NO"
+          echo "=== pcscd present? ==="
+          ls rootfs/usr/sbin/pcscd 2>/dev/null && echo "YES" || echo "NO"
 
       - name: Patch boot config for Pi 2B diskless mode
         run: |
-          # config.txt includes usercfg.txt - use that for our overrides
-          # so we don't fight with the auto-generated config.txt on upgrades
+          # usercfg.txt is included by config.txt - safe place for our overrides
           cat > rootfs/usercfg.txt << 'EOF'
           kernel=boot/vmlinuz-rpi2
           initramfs boot/initramfs-rpi2
@@ -53,80 +126,10 @@ jobs:
           echo "=== usercfg.txt ==="
           cat rootfs/usercfg.txt
 
-      - name: Enable ARM emulation
-        run: |
-          docker run --privileged --rm tonistiigi/binfmt --install arm
-
-      - name: Download and pre-install packages into rootfs
-        run: |
-          mkdir -p rootfs/apks/armv7
-
-          # Do this on the HOST before Docker runs - eliminates any race/permission issue
-          # with deleting inside the container while it's mounted
-          sudo rm -rf rootfs/lib/apk/db
-          sudo rm -rf rootfs/lib/apk/db.lock  
-          sudo rm -f rootfs/etc/apk/world
-
-          docker run --rm \
-            --platform linux/arm/v7 \
-            --privileged \
-            -v $(pwd)/rootfs:/mnt/rootfs \
-            -v $(pwd)/rootfs/apks/armv7:/packages \
-            arm32v7/alpine:3.23 \
-            sh -c "
-              set -e
-              apk update
-
-              # Remove vlan from container's own world too
-              apk del vlan 2>/dev/null || true
-              sed -i '/^vlan$/d' /etc/apk/world
-              apk upgrade --no-cache
-
-              apk fetch --recursive --no-cache -o /packages \
-                gnupg \
-                gnupg-dirmngr \
-                gpg-agent \
-                gnupg-scdaemon \
-                cryptsetup \
-                e2fsprogs \
-                pcsc-lite \
-                pcsc-lite-libs \
-                pcsc-lite-openrc \
-                ccid \
-                pinentry \
-                yubikey-manager \
-                ykpers \
-                openssl \
-                ifupdown-ng \
-                alpine-base
-
-              # /mnt/rootfs/lib/apk/db and world already wiped on host above
-              apk add \
-                --root /mnt/rootfs \
-                --initdb \
-                --allow-untrusted \
-                --no-network \
-                --repositories-file /dev/null \
-                /packages/*.apk
-            "
-          sudo chown -R $USER:$USER rootfs/
-
-      - name: Verify install
-        run: |
-          echo "=== /sbin/init exists? ==="
-          ls -la rootfs/sbin/init
-          echo "=== installed packages ==="
-          cat rootfs/etc/apk/world 2>/dev/null || echo "no world file"
-          echo "=== rootfs size ==="
-          du -sh rootfs/
-          echo "=== vlan/ifupdown-ng check ==="
-          grep -E "^P:(vlan|ifupdown-ng|network-extras)" rootfs/lib/apk/db/installed 2>/dev/null || echo "grep done"
-
       - name: Build apkovl
         run: |
           mkdir -p apkovl/etc/apk
           mkdir -p apkovl/etc/runlevels/default
-          mkdir -p apkovl/etc/runlevels/boot
           mkdir -p apkovl/root/.gnupg
 
           printf '/media/mmcblk0p1/apks\n' > apkovl/etc/apk/repositories
