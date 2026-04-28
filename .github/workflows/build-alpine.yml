@@ -31,9 +31,6 @@ jobs:
         run: |
           mkdir -p rootfs/apks/armv7
 
-          # Wipe stale apk db on the HOST before Docker runs.
-          # The tarball world pins 'vlan' which conflicts with ifupdown-ng.
-          # We wipe it so apk starts completely fresh with no prior state.
           sudo rm -rf rootfs/lib/apk/db
           sudo rm -f rootfs/etc/apk/world
 
@@ -47,16 +44,10 @@ jobs:
               set -e
               apk update
 
-              # Strip vlan from container world and upgrade so container packages
-              # match the mirror - prevents version skew during fetch
               sed -i '/^vlan$/d' /etc/apk/world
               apk fix 2>/dev/null || true
               apk upgrade --no-cache
 
-              # Fetch ONLY our custom packages and their deps.
-              # Do NOT fetch alpine-base/ifupdown-ng/network-extras/vlan -
-              # those are the conflict chain. The tarball already has a working
-              # base system; we only need to add our packages on top.
               apk fetch --recursive --no-cache -o /packages \
                 gnupg \
                 gnupg-dirmngr \
@@ -70,11 +61,10 @@ jobs:
                 ccid \
                 pinentry \
                 yubikey-manager \
-                ykpers
+                ykpers \
+                python3 \
+                py3-cryptography
 
-              # Install into rootfs with --initdb (fresh db) but
-              # with --force-broken-world so apk does not try to
-              # re-resolve or reinstall base system packages
               apk add \
                 --root /mnt/rootfs \
                 --initdb \
@@ -98,14 +88,18 @@ jobs:
           ls rootfs/usr/bin/gpg 2>/dev/null && echo "YES" || echo "NO"
           echo "=== pcscd present? ==="
           ls rootfs/usr/sbin/pcscd 2>/dev/null && echo "YES" || echo "NO"
+          echo "=== python3 present? ==="
+          ls rootfs/usr/bin/python3 2>/dev/null && echo "YES" || echo "NO"
+          echo "=== py3-cryptography present? ==="
+          ls rootfs/usr/lib/python3*/site-packages/cryptography 2>/dev/null && echo "YES" || echo "NO"
+          echo "=== threshold scripts present? ==="
+          ls rootfs/usr/local/bin/encrypt.py rootfs/usr/local/bin/decrypt.py rootfs/usr/local/bin/shamir.py 2>/dev/null && echo "YES" || echo "NO"
 
       - name: Patch boot config for Pi 2B diskless mode
         run: |
-          # List what kernels are actually in the tarball so we use the right name
           echo "=== available kernels ==="
           ls rootfs/boot/
 
-          # usercfg.txt - use rpi2 kernel if it exists, fall back to rpi
           if [ -f rootfs/boot/vmlinuz-rpi2 ]; then
             KERNEL="vmlinuz-rpi2"
             INITRAMFS="initramfs-rpi2"
@@ -115,12 +109,12 @@ jobs:
           fi
           echo "Using kernel: $KERNEL"
 
-          cat > rootfs/usercfg.txt << EOF
+          cat > rootfs/usercfg.txt << BOOTEOF
           kernel=boot/$KERNEL
           initramfs boot/$INITRAMFS
           enable_uart=1
           disable_overscan=1
-          EOF
+          BOOTEOF
           sed -i 's/^[[:space:]]*//' rootfs/usercfg.txt
 
           EXISTING=$(tr -d '\n\r' < rootfs/cmdline.txt | sed 's/[[:space:]]*$//')
@@ -136,6 +130,25 @@ jobs:
           cat -A rootfs/cmdline.txt
           echo "=== usercfg.txt ==="
           cat rootfs/usercfg.txt
+
+      - name: Install threshold scripts into rootfs
+        run: |
+          # All three files go directly into /usr/local/bin/.
+          # encrypt.py does `from shamir import split_secret` — this works because
+          # Python adds the script's own directory to sys.path automatically,
+          # so shamir.py sitting next to encrypt.py / decrypt.py is enough.
+
+          BIN=rootfs/usr/local/bin
+          mkdir -p "$BIN"
+
+          cp python/shamir.py  "$BIN/shamir.py"
+          cp python/encrypt.py "$BIN/encrypt.py"
+          cp python/decrypt.py "$BIN/decrypt.py"
+          chmod 755 "$BIN/encrypt.py" "$BIN/decrypt.py"
+          chmod 644 "$BIN/shamir.py"
+
+          echo "=== installed files ==="
+          ls -la "$BIN/shamir.py" "$BIN/encrypt.py" "$BIN/decrypt.py"
 
       - name: Build apkovl
         run: |
@@ -160,6 +173,8 @@ jobs:
           pinentry
           yubikey-manager
           ykpers
+          python3
+          py3-cryptography
           EOF
           sed -i 's/^[[:space:]]*//' apkovl/etc/apk/world
 
