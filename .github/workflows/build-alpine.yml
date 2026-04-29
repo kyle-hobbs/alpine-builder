@@ -43,9 +43,6 @@ jobs:
             sh -c "
               set -e
               apk update
-
-              sed -i '/^vlan$/d' /etc/apk/world
-              apk fix 2>/dev/null || true
               apk upgrade --no-cache
 
               apk fetch --recursive --no-cache -o /packages \
@@ -65,14 +62,11 @@ jobs:
                 python3 \
                 py3-cryptography
 
-              apk add \
-                --root /mnt/rootfs \
-                --initdb \
-                --allow-untrusted \
-                --no-network \
-                --force-broken-world \
-                --repositories-file /dev/null \
-                /packages/*.apk
+              # Remove packages that conflict on diskless install
+              rm -f /packages/vlan-*.apk \
+                     /packages/libcrypto*.apk \
+                     /packages/libssl*.apk \
+                     /packages/ifupdown-ng*.apk
             "
           sudo chown -R $USER:$USER rootfs/
 
@@ -131,24 +125,47 @@ jobs:
           echo "=== usercfg.txt ==="
           cat rootfs/usercfg.txt
 
-      - name: Install threshold scripts into rootfs
+      - name: Stage threshold scripts and boot installer
         run: |
-          # All three files go directly into /usr/local/bin/.
-          # encrypt.py does `from shamir import split_secret` — this works because
-          # Python adds the script's own directory to sys.path automatically,
-          # so shamir.py sitting next to encrypt.py / decrypt.py is enough.
+          # Scripts land on the FAT partition (rootfs/ = /media/mmcblk0p1 at runtime).
+          # A firstboot.sh script runs on boot, installs the apks and copies
+          # the python scripts into the live in-memory /usr/local/bin.
 
-          BIN=rootfs/usr/local/bin
-          mkdir -p "$BIN"
+          STAGE=rootfs/threshold
+          mkdir -p "$STAGE"
 
-          cp python/shamir.py  "$BIN/shamir.py"
-          cp python/encrypt.py "$BIN/encrypt.py"
-          cp python/decrypt.py "$BIN/decrypt.py"
-          chmod 755 "$BIN/encrypt.py" "$BIN/decrypt.py"
-          chmod 644 "$BIN/shamir.py"
+          cp python/shamir.py  "$STAGE/shamir.py"
+          cp python/encrypt.py "$STAGE/encrypt.py"
+          cp python/decrypt.py "$STAGE/decrypt.py"
 
-          echo "=== installed files ==="
-          ls -la "$BIN/shamir.py" "$BIN/encrypt.py" "$BIN/decrypt.py"
+          cat > rootfs/firstboot.sh << 'EOF'
+          #!/bin/sh
+          set -e
+
+          MEDIA=/media/mmcblk0p1
+          PKG_DIR="$MEDIA/apks/armv7"
+          SCRIPTS_DIR="$MEDIA/threshold"
+
+          echo "[firstboot] Installing apks from $PKG_DIR ..."
+          cd "$PKG_DIR"
+          apk add \
+            --allow-untrusted \
+            --no-network \
+            --force-broken-world \
+            *.apk
+
+          echo "[firstboot] Installing threshold scripts ..."
+          install -m 755 "$SCRIPTS_DIR/encrypt.py" /usr/local/bin/encrypt.py
+          install -m 755 "$SCRIPTS_DIR/decrypt.py" /usr/local/bin/decrypt.py
+          install -m 644 "$SCRIPTS_DIR/shamir.py"  /usr/local/bin/shamir.py
+
+          echo "[firstboot] Done."
+          EOF
+          chmod 755 rootfs/firstboot.sh
+
+          echo "=== staged files ==="
+          ls -la "$STAGE/"
+          ls -la rootfs/firstboot.sh
 
       - name: Build apkovl
         run: |
@@ -218,7 +235,20 @@ jobs:
 
           chmod 700 apkovl/root/.gnupg
           chmod 600 apkovl/root/.gnupg/gpg.conf apkovl/root/.gnupg/gpg-agent.conf
+          
+          # local.d runs scripts on boot via the local service
+          mkdir -p apkovl/etc/local.d
+          cat > apkovl/etc/local.d/firstboot.start << 'EOF'
+          #!/bin/sh
+          /media/mmcblk0p1/firstboot.sh
+          EOF
+          sed -i 's/^[[:space:]]*//' apkovl/etc/local.d/firstboot.start
+          chmod 755 apkovl/etc/local.d/firstboot.start
 
+          # Enable the local service so local.d scripts actually run
+          mkdir -p apkovl/etc/runlevels/default
+          touch apkovl/etc/runlevels/default/local
+          
           cd apkovl
           tar -czf ../rootfs/localhost.apkovl.tar.gz .
 
