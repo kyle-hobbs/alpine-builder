@@ -31,8 +31,7 @@ jobs:
         run: |
           mkdir -p rootfs/apks/armv7
 
-          sudo rm -rf rootfs/lib/apk/db
-          sudo rm -f rootfs/etc/apk/world
+          # Do NOT wipe lib/apk/db — keep the base system the tarball gave us
 
           docker run --rm \
             --platform linux/arm/v7 \
@@ -62,7 +61,6 @@ jobs:
                 python3 \
                 py3-cryptography
 
-              # Remove packages that conflict on diskless install
               rm -f /packages/vlan-*.apk \
                      /packages/libcrypto*.apk \
                      /packages/libssl*.apk \
