@@ -68,24 +68,32 @@ jobs:
             "
           sudo chown -R $USER:$USER rootfs/
 
-      - name: Verify install
+      - name: Verify build
         run: |
-          echo "=== /sbin/init exists? ==="
-          ls -la rootfs/sbin/init
-          echo "=== world file ==="
-          cat rootfs/etc/apk/world 2>/dev/null || echo "no world file"
-          echo "=== rootfs size ==="
+          echo "=== boot files present? ==="
+          ls -la rootfs/
+
+          echo "=== cmdline.txt ==="
+          cat rootfs/cmdline.txt
+
+          echo "=== usercfg.txt ==="
+          cat rootfs/usercfg.txt
+
+          echo "=== apks fetched ==="
+          ls rootfs/apks/armv7/*.apk 2>/dev/null | wc -l
+          echo "apk files"
+
+          echo "=== threshold scripts staged ==="
+          ls -la rootfs/threshold/ 2>/dev/null || echo "NOT FOUND"
+
+          echo "=== firstboot.sh staged ==="
+          ls -la rootfs/firstboot.sh 2>/dev/null || echo "NOT FOUND"
+
+          echo "=== apkovl contents ==="
+          tar -tzf rootfs/localhost.apkovl.tar.gz
+
+          echo "=== total FAT partition size ==="
           du -sh rootfs/
-          echo "=== gnupg present? ==="
-          ls rootfs/usr/bin/gpg 2>/dev/null && echo "YES" || echo "NO"
-          echo "=== pcscd present? ==="
-          ls rootfs/usr/sbin/pcscd 2>/dev/null && echo "YES" || echo "NO"
-          echo "=== python3 present? ==="
-          ls rootfs/usr/bin/python3 2>/dev/null && echo "YES" || echo "NO"
-          echo "=== py3-cryptography present? ==="
-          ls rootfs/usr/lib/python3*/site-packages/cryptography 2>/dev/null && echo "YES" || echo "NO"
-          echo "=== threshold scripts present? ==="
-          ls rootfs/usr/local/bin/encrypt.py rootfs/usr/local/bin/decrypt.py rootfs/usr/local/bin/shamir.py 2>/dev/null && echo "YES" || echo "NO"
 
       - name: Patch boot config for Pi 2B diskless mode
         run: |
